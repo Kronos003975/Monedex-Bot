@@ -1,0 +1,77 @@
+import logging
+from telegram import Update
+from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+from datetime import datetime
+import requests
+
+ Configuración
+API_URL = "https://api.exchangerate.host/convert"
+COMISION_PORCENTAJE = 0.02  2%
+HISTORIAL_ARCHIVO = "historial.txt"
+TOKEN = 8084717001:AAFNwZVSsHj3gM_VEOoyHDfuCSNLHK0OZGo
+
+# Logs
+logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
+
+ Función para convertir monedas
+async def cambiar(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        args = context.args
+        if len(args) != 3:
+            await update.message.reply_text("Uso: /cambiar USD EUR 100")
+            return
+        
+        moneda_origen, moneda_destino, cantidad = args
+        cantidad = float(cantidad)
+
+        response = requests.get(API_URL, params={
+            "from": moneda_origen.upper(),
+            "to": moneda_destino.upper(),
+            "amount": cantidad
+        }).json()
+
+        if "result" in response and response["result"] is not None:
+            convertido = response["result"]
+            comision = convertido * COMISION_PORCENTAJE
+            total_final = convertido - comision
+
+            mensaje = (
+                f"{cantidad} {moneda_origen.upper()} = {convertido:.2f} {moneda_destino.upper()}\n"
+                f"Comisión ({COMISION_PORCENTAJE * 100}%): {comision:.2f} {moneda_destino.upper()}\n"
+                f"Total final: {total_final:.2f} {moneda_destino.upper()}"
+            )
+
+            guardar_historial(update.effective_user.username, moneda_origen, moneda_destino, cantidad, total_final)
+            await update.message.reply_text(mensaje)
+        else:
+            await update.message.reply_text("Error al obtener el tipo de cambio.")
+    except Exception as e:
+        await update.message.reply_text(f"Error: {e}")
+
+# Función para guardar en historial
+def guardar_historial(usuario, origen, destino, cantidad, total):
+    with open(HISTORIAL_ARCHIVO, "a") as f:
+        f.write(f"{datetime.now()} - {usuario} - {cantidad} {origen} → {total:.2f} {destino}\n")
+
+# Comando /start
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("¡Bienvenido a MonedexBot! Usa /cambiar USD EUR 100 para convertir.")
+
+# Comando /historial
+async def historial(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        with open(HISTORIAL_ARCHIVO, "r") as f:
+            lineas = f.readlines()[-10:]  # últimas 10 operaciones
+            mensaje = "".join(lineas) if lineas else "Sin historial."
+            await update.message.reply_text(mensaje)
+    except FileNotFoundError:
+        await update.message.reply_text("No hay historial aún.")
+
+# Iniciar el bot
+if __name__ == "__main__":
+    app = ApplicationBuilder().token(TOKEN).build()
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("cambiar", cambiar))
+    app.add_handler(CommandHandler("historial", historial))
+    print("Bot corriendo...")
+    app.run_polling()
